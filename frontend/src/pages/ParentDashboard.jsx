@@ -55,6 +55,53 @@ const ParentDashboard = ({ user, onLogout }) => {
             <p className="mt-3 text-sm">Child: <span className="font-bold">{data.child}</span></p>
             <p className="mt-1 text-sm">Trend: <span className="font-bold">{data.trend}</span></p>
             <p className="mt-1 text-sm">Risk Level: <span className="font-bold">{data.risk_level}</span></p>
+
+            {/* Student Learning Level Badge */}
+            {data.student_profile && (
+              <div className={`mt-4 rounded-2xl p-4 ${
+                data.student_profile === "struggling"
+                  ? "border-2 border-rose-300 bg-gradient-to-br from-rose-50 to-rose-100"
+                  : data.student_profile === "advanced"
+                    ? "border-2 border-emerald-300 bg-gradient-to-br from-emerald-50 to-emerald-100"
+                    : "border-2 border-amber-300 bg-gradient-to-br from-amber-50 to-amber-100"
+              }`}>
+                <div className="flex items-center gap-3">
+                  <span className="text-3xl">
+                    {data.student_profile === "struggling" ? "🔴" : data.student_profile === "advanced" ? "🟢" : "🟡"}
+                  </span>
+                  <div>
+                    <p className={`text-xs font-bold uppercase tracking-wider ${
+                      data.student_profile === "struggling"
+                        ? "text-rose-600"
+                        : data.student_profile === "advanced"
+                          ? "text-emerald-600"
+                          : "text-amber-600"
+                    }`}>Learning Level</p>
+                    <p className={`text-lg font-extrabold capitalize ${
+                      data.student_profile === "struggling"
+                        ? "text-rose-800"
+                        : data.student_profile === "advanced"
+                          ? "text-emerald-800"
+                          : "text-amber-800"
+                    }`}>{data.student_profile}</p>
+                  </div>
+                </div>
+                <p className={`mt-2 text-xs ${
+                  data.student_profile === "struggling"
+                    ? "text-rose-700"
+                    : data.student_profile === "advanced"
+                      ? "text-emerald-700"
+                      : "text-amber-700"
+                }`}>
+                  {data.student_profile === "struggling"
+                    ? "Your child may need extra support. Consider reviewing weak topics together and encouraging consistent practice."
+                    : data.student_profile === "advanced"
+                      ? "Your child is excelling! They consistently demonstrate strong understanding and are ready for more challenging material."
+                      : "Your child is progressing well. Steady practice will help them continue improving across all topics."}
+                </p>
+              </div>
+            )}
+
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div className="rounded-xl bg-rose-50 p-3">
                 <p className="text-xs font-bold uppercase text-rose-700">Weak Topics</p>

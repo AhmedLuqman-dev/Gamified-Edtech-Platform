@@ -1,9 +1,19 @@
 const Groq = require("groq-sdk");
 const pool = require("../db");
 
-const groq = new Groq({
-  apiKey: process.env.GROQ_KEY,
-});
+// Lazy initialization — only create the Groq client when actually needed
+// This prevents the server from crashing if GROQ_KEY is missing at startup
+let groq = null;
+function getGroqClient() {
+  if (!groq) {
+    const apiKey = process.env.GROQ_KEY;
+    if (!apiKey) {
+      throw new Error("GROQ_KEY is not set in environment variables");
+    }
+    groq = new Groq({ apiKey });
+  }
+  return groq;
+}
 
 async function getStudentContext(user_id) {
   const history = await pool.query(`
@@ -43,17 +53,17 @@ function buildPrompt(question, context, selected_answer) {
     Options: ${JSON.stringify(question.options)}
 
     Student Answer: ${selected_answer}
-    Correct Answer: ${question.correct_option}
+    Correct Answer: ${question.correct_answer}
 
     TASK:
-    1. Explain why correct answer is right
-    2. Explain why student's answer is wrong (if wrong)
-    3. Connect explanation to weak concepts
-    4. Give a short learning tip
+    1. Explain why the correct answer is right
+    2. Explain why the student's answer is wrong (if wrong)
+    3. Connect the explanation to their weak concepts if relevant
+    4. Give a short, actionable learning tip
     5. Keep response simple, friendly, and motivating
     6. Make it feel like a game quest feedback system
 
-    Return response in structured sections with headers only. No excessive emojis.
+    Return response in structured sections with clear headers. Keep it concise (under 200 words). No excessive emojis.
     `;
 }
 
@@ -64,7 +74,8 @@ async function generateExplanation(user_id, question, selected_answer) {
 
     const prompt = buildPrompt(question, context, selected_answer);
 
-    const response = await groq.chat.completions.create({
+    const client = getGroqClient();
+    const response = await client.chat.completions.create({
       model: "llama-3.1-8b-instant",
       messages: [
         {

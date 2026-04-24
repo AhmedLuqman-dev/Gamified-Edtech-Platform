@@ -631,6 +631,14 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
             if (g.percentage >= 80) strong_topics.push(g.assignment_id);
         });
 
+        // Compute student_profile (struggling / average / advanced)
+        let student_profile = "average";
+        if (strong_topics.length > weak_topics.length + 2) {
+            student_profile = "advanced";
+        } else if (weak_topics.length > strong_topics.length) {
+            student_profile = "struggling";
+        }
+
         let trend = "stable";
         if (average_grade > 70) trend = "improving";
         else if (average_grade < 50) trend = "declining";
@@ -660,7 +668,8 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
             weak_topics,
             strong_topics,
             trend,
-            risk_level
+            risk_level,
+            student_profile
         });
 
     } catch (err) {
@@ -791,14 +800,14 @@ app.post("/check-answer", authRequired(["student", "parent", "admin"]), async (r
       if (existingProgress.rows.length) {
         await pool.query(
           `UPDATE student_chapter_progress
-           SET status = 'COMPLETED', mastery_level = GREATEST(COALESCE(mastery_level, 0), 80)
+           SET status = 'completed', mastery_level = GREATEST(COALESCE(mastery_level, 0), 80)
            WHERE user_id = $1 AND chapter = $2`,
           [user_id, chapter]
         );
       } else {
         await pool.query(
           `INSERT INTO student_chapter_progress (user_id, chapter, status, mastery_level)
-           VALUES ($1, $2, 'COMPLETED', 80)`,
+           VALUES ($1, $2, 'completed', 80)`,
           [user_id, chapter]
         );
       }
@@ -817,12 +826,24 @@ app.post("/check-answer", authRequired(["student", "parent", "admin"]), async (r
 
 app.post("/ai/explain", async (req, res) => {
   try {
+    const { user_id, question, question_id, selected_answer } = req.body;
 
-    const { user_id, question, selected_answer } = req.body;
+    // If question_id is provided but question object is not, look it up from DB
+    let questionData = question;
+    if (!questionData && question_id) {
+      const qResult = await pool.query(`SELECT * FROM questions WHERE id = $1`, [question_id]);
+      if (qResult.rows.length) {
+        questionData = qResult.rows[0];
+      }
+    }
+
+    if (!questionData) {
+      return res.status(400).json({ error: "Question data or valid question_id is required" });
+    }
 
     const result = await generateExplanation(
       user_id,
-      question,
+      questionData,
       selected_answer
     );
 
