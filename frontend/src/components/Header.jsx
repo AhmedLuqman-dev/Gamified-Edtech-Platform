@@ -1,4 +1,4 @@
-const Header = ({ totalXP, selectedStudentProfile }) => {
+const Header = ({ totalXP, selectedStudentProfile, level }) => {
   const profileLabelMap = {
     struggling: "Struggling",
     average: "Average",
@@ -15,6 +15,9 @@ const Header = ({ totalXP, selectedStudentProfile }) => {
           </h1>
         </div>
         <div className="flex items-center gap-3">
+          <span className="rounded-full bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700">
+            Level {level}
+          </span>
           <span className="rounded-full bg-brand-haze px-4 py-2 text-sm font-semibold text-brand-ocean">
             Profile: {profileLabelMap[selectedStudentProfile]}
           </span>
