@@ -79,9 +79,9 @@ const StudentDashboard = ({ user, onLogout }) => {
                 .toUpperCase()}
             </div>
             <div className="min-w-0">
-              <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-amber-300/80">EduRPG · Student hub</p>
+              <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-amber-300/80">EduQuest XP · Student hub</p>
               <h1 className="truncate font-['Nunito'] text-2xl font-extrabold text-amber-100 sm:text-3xl">{user.username}</h1>
-              <p className="mt-0.5 text-sm text-cyan-200/80">Pick a subject run — maps, skill flow, and Groq duels await.</p>
+              <p className="mt-0.5 text-sm text-cyan-200/80">Pick a subject run — maps, skill flow, and topic duels await.</p>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
@@ -124,7 +124,7 @@ const StudentDashboard = ({ user, onLogout }) => {
           <main className="flex flex-col items-center justify-center rounded-3xl border border-violet-500/25 bg-slate-950/60 px-6 py-12 text-center shadow-[0_0_50px_rgba(139,92,246,0.12)] lg:col-span-6">
             <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-violet-300/90">Enter subject run</p>
             <h2 className="mt-2 font-['Nunito'] text-xl font-extrabold text-slate-100 sm:text-2xl">Choose your track</h2>
-            <p className="mt-2 max-w-sm text-sm text-slate-400">Science, History, or Maths — each has a topic map, skill cycle, and AI-generated questions.</p>
+            <p className="mt-2 max-w-sm text-sm text-slate-400">Science, History, or Maths </p>
             <div className="mt-8 flex w-full max-w-xs flex-col gap-3 sm:max-w-sm">
               <label className="text-left text-xs font-bold uppercase tracking-wider text-slate-500" htmlFor="subject-select">
                 Subject

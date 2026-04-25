@@ -25,15 +25,15 @@ body {
   min-height: 100vh;
 }
 
-/* Landing — EduRPG hero */
-.edurpg-hero-card {
+/* Landing — EduQuest XP hero */
+.eduquest-hero-card {
   position: relative;
   overflow: hidden;
   isolation: isolate;
-  animation: edurpgCardGlow 5s ease-in-out infinite;
+  animation: eduquestCardGlow 5s ease-in-out infinite;
 }
 
-.edurpg-hero-card::before {
+.eduquest-hero-card::before {
   content: "";
   position: absolute;
   inset: -40%;
@@ -44,11 +44,11 @@ body {
     rgba(255, 112, 67, 0.12),
     rgba(47, 124, 246, 0.12)
   );
-  animation: edurpgAuraSpin 14s linear infinite;
+  animation: eduquestAuraSpin 14s linear infinite;
   z-index: 0;
 }
 
-.edurpg-hero-card::after {
+.eduquest-hero-card::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -61,12 +61,12 @@ body {
     transparent 100%
   );
   background-size: 200% 100%;
-  animation: edurpgShineSweep 6s ease-in-out infinite;
+  animation: eduquestShineSweep 6s ease-in-out infinite;
   z-index: 1;
   pointer-events: none;
 }
 
-.edurpg-hero-inner {
+.eduquest-hero-inner {
   position: relative;
   z-index: 2;
   display: flex;
@@ -75,7 +75,7 @@ body {
   justify-content: center;
 }
 
-.edurpg-title {
+.eduquest-title {
   margin: 0;
   font-family: "Nunito", sans-serif;
   font-size: clamp(3rem, 12vw, 5.5rem);
@@ -94,61 +94,61 @@ body {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: edurpgTextShimmer 5s linear infinite, edurpgTitleFloat 3.2s ease-in-out infinite;
+  animation: eduquestTextShimmer 5s linear infinite, eduquestTitleFloat 3.2s ease-in-out infinite;
   filter: drop-shadow(0 6px 20px rgba(47, 124, 246, 0.35)) drop-shadow(0 2px 0 rgba(20, 25, 34, 0.08));
 }
 
-.edurpg-sparkles {
+.eduquest-sparkles {
   position: absolute;
   inset: 0;
   z-index: 2;
   pointer-events: none;
 }
 
-.edurpg-spark {
+.eduquest-spark {
   position: absolute;
   width: 7px;
   height: 7px;
   border-radius: 9999px;
   background: radial-gradient(circle, #fff 0%, rgba(47, 124, 246, 0.4) 55%, transparent 70%);
   box-shadow: 0 0 10px rgba(47, 191, 143, 0.8);
-  animation: edurpgTwinkle 2.4s ease-in-out infinite;
+  animation: eduquestTwinkle 2.4s ease-in-out infinite;
 }
 
-.edurpg-spark:nth-child(1) {
+.eduquest-spark:nth-child(1) {
   top: 18%;
   left: 12%;
   animation-delay: 0s;
 }
-.edurpg-spark:nth-child(2) {
+.eduquest-spark:nth-child(2) {
   top: 22%;
   right: 14%;
   animation-delay: 0.4s;
 }
-.edurpg-spark:nth-child(3) {
+.eduquest-spark:nth-child(3) {
   bottom: 20%;
   left: 18%;
   animation-delay: 0.8s;
 }
-.edurpg-spark:nth-child(4) {
+.eduquest-spark:nth-child(4) {
   bottom: 24%;
   right: 11%;
   animation-delay: 1.1s;
 }
-.edurpg-spark:nth-child(5) {
+.eduquest-spark:nth-child(5) {
   top: 48%;
   left: 6%;
   animation-delay: 0.2s;
   transform: scale(0.85);
 }
-.edurpg-spark:nth-child(6) {
+.eduquest-spark:nth-child(6) {
   top: 52%;
   right: 7%;
   animation-delay: 1.5s;
   transform: scale(0.75);
 }
 
-@keyframes edurpgCardGlow {
+@keyframes eduquestCardGlow {
   0%,
   100% {
     box-shadow:
@@ -163,13 +163,13 @@ body {
   }
 }
 
-@keyframes edurpgAuraSpin {
+@keyframes eduquestAuraSpin {
   to {
     transform: rotate(360deg);
   }
 }
 
-@keyframes edurpgShineSweep {
+@keyframes eduquestShineSweep {
   0%,
   100% {
     background-position: 100% 0;
@@ -187,7 +187,7 @@ body {
   }
 }
 
-@keyframes edurpgTextShimmer {
+@keyframes eduquestTextShimmer {
   0% {
     background-position: 0% center;
   }
@@ -196,7 +196,7 @@ body {
   }
 }
 
-@keyframes edurpgTitleFloat {
+@keyframes eduquestTitleFloat {
   0%,
   100% {
     transform: translateY(0) scale(1);
@@ -206,7 +206,7 @@ body {
   }
 }
 
-@keyframes edurpgTwinkle {
+@keyframes eduquestTwinkle {
   0%,
   100% {
     opacity: 0.25;

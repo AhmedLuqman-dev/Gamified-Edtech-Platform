@@ -16,6 +16,8 @@ const STATUS_STYLE = {
   LOCKED: "bg-slate-100/80 border-slate-200 text-slate-500"
 };
 
+import { formatTopicLabel } from "../lib/topicLabel";
+
 const SkillNode = ({ node, status, isActive, onClick }) => {
   const isUnlocked = status === "UNLOCKED";
   const isBoss = node.type === "boss";
@@ -57,7 +59,7 @@ const SkillNode = ({ node, status, isActive, onClick }) => {
         </span>
       </div>
 
-      <h3 className="relative z-[1] font-['Nunito'] text-lg font-extrabold leading-tight">{node.chapter}</h3>
+      <h3 className="relative z-[1] font-['Nunito'] text-lg font-extrabold leading-tight">{formatTopicLabel(node.chapter)}</h3>
       <p className="relative z-[1] mt-1 text-xs text-slate-500">{node.type || "quest"}</p>
       <p className="relative z-[1] mt-2 text-sm font-bold text-amber-600">+{node.xp ?? 0} XP</p>
 

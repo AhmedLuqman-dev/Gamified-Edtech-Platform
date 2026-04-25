@@ -5,6 +5,7 @@ import ProgressBar from "../components/ProgressBar";
 import SkillTree from "../components/SkillTree";
 import QuestModal from "../components/QuestModal";
 import TopicSkillGraph from "../components/TopicSkillGraph";
+import { formatTopicLabel } from "../lib/topicLabel";
 
 const slugLabels = {
   science: "Science",
@@ -111,7 +112,7 @@ const StudentSubjectPage = ({ user, onLogout }) => {
         <header className="mb-5 rounded-2xl border border-amber-500/20 bg-slate-900/60 p-4 shadow-[0_0_40px_rgba(251,191,36,0.12)] backdrop-blur">
           <p className="text-xs font-extrabold uppercase tracking-[0.2em] text-amber-300/80">Subject run</p>
           <h1 className="font-['Nunito'] text-2xl font-extrabold text-amber-100 sm:text-3xl">{subjectLabel}</h1>
-          <p className="mt-1 text-sm text-cyan-200/80">Skill cycle · Groq-spawned duels · Topic map</p>
+          <p className="mt-1 text-sm text-cyan-200/80">Skill cycle · Spawned duels · Topic map</p>
         </header>
 
         {error ? <p className="mb-3 rounded-xl border border-rose-500/40 bg-rose-950/50 p-3 text-rose-200">{error}</p> : null}
@@ -139,7 +140,7 @@ const StudentSubjectPage = ({ user, onLogout }) => {
               onClick={startActiveQuest}
               className="mt-4 w-full rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 py-2.5 text-sm font-extrabold text-slate-900 shadow-lg transition hover:brightness-110"
             >
-              {activeQuestChapter ? `Engage: ${activeQuestChapter.split("::").pop()}` : "Path locked or complete"}
+              {activeQuestChapter ? `Engage: ${formatTopicLabel(activeQuestChapter)}` : "Path locked or complete"}
             </button>
           </div>
         </div>
@@ -151,7 +152,7 @@ const StudentSubjectPage = ({ user, onLogout }) => {
             <h2 className="font-['Nunito'] text-2xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-amber-200 to-cyan-200">
               Quest constellation
             </h2>
-            <p className="mt-1 text-sm text-slate-400">Questions are generated with Groq for this subject path.</p>
+            <p className="mt-1 text-sm text-slate-400">Questions are generated for this subject path.</p>
             <div className="mt-4 animate-floatSlow min-h-[200px]">
               <SkillTree
                 curriculum={questMap?.curriculum || []}
