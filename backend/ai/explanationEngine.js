@@ -42,29 +42,34 @@ async function getStudentContext(user_id) {
 }
 
 function buildPrompt(question, context, selected_answer) {
-  return `
-    You are an AI tutor in a gamified learning system.
+  const isCorrect = String(selected_answer).trim() === String(question.correct_answer).trim();
 
-    Student Weak Concepts: ${JSON.stringify(context.weakConcepts)}
-    Student Strong Concepts: ${JSON.stringify(context.strongConcepts)}
+  return `You are explaining a quiz result to a student.
 
-    Question: ${question.question_text}
+IMPORTANT RULES:
+- The CORRECT ANSWER is: "${question.correct_answer}" — this is a FACT, do NOT question it or recalculate it.
+- The student selected: "${selected_answer}"
+- The student was ${isCorrect ? "CORRECT" : "WRONG"}.
+- Do NOT attempt to solve the problem yourself. Just explain WHY "${question.correct_answer}" is correct.
+- NEVER contradict the correct answer. NEVER say the correct answer might be wrong.
+- Keep your explanation under 150 words.
 
-    Options: ${JSON.stringify(question.options)}
+QUESTION: ${question.question_text}
+OPTIONS: ${JSON.stringify(question.options)}
+CORRECT ANSWER: ${question.correct_answer}
+STUDENT'S ANSWER: ${selected_answer}
 
-    Student Answer: ${selected_answer}
-    Correct Answer: ${question.correct_answer}
+${isCorrect
+    ? `The student got it right. Give a brief congratulatory explanation of WHY "${question.correct_answer}" is the right answer. Be concise and encouraging.`
+    : `The student picked "${selected_answer}" but the correct answer is "${question.correct_answer}". Explain:
+1. WHY "${question.correct_answer}" is correct (explain the concept, not re-solving)
+2. WHY "${selected_answer}" is wrong (brief, kind)
+3. A short tip to remember this concept`
+}
 
-    TASK:
-    1. Explain why the correct answer is right
-    2. Explain why the student's answer is wrong (if wrong)
-    3. Connect the explanation to their weak concepts if relevant
-    4. Give a short, actionable learning tip
-    5. Keep response simple, friendly, and motivating
-    6. Make it feel like a game quest feedback system
+${context.weakConcepts.length ? `Student's weak areas: ${context.weakConcepts.join(", ")}. Connect to these if relevant.` : ""}
 
-    Return response in structured sections with clear headers. Keep it concise (under 200 words). No excessive emojis.
-    `;
+Format with clear headers using **bold**. Be friendly and motivating. No excessive emojis.`;
 }
 
 
@@ -80,14 +85,20 @@ async function generateExplanation(user_id, question, selected_answer) {
       messages: [
         {
           role: "system",
-          content: "You are a helpful AI tutor inside a gamified education system."
+          content: `You are a quiz explanation assistant. Your ONLY job is to explain why the provided correct answer is right. CRITICAL RULES:
+1. The correct answer given to you is ALWAYS right — never question it, never recalculate it, never say it might be wrong.
+2. Do NOT solve the problem from scratch. Just explain the concept behind WHY the answer is what it is.
+3. If it's a math problem, do NOT show your own calculations that might differ. Just explain the method briefly.
+4. Be concise, clear, and encouraging. Under 150 words.
+5. Never contradict yourself. Never say "wait" or "actually" or change your mind mid-explanation.`
         },
         {
           role: "user",
           content: prompt
         }
       ],
-      temperature: 0.7
+      temperature: 0.3,
+      max_tokens: 400
     });
 
     return {

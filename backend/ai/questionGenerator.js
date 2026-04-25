@@ -70,6 +70,14 @@ function validateQuestionItem(parsed) {
   if (options.length !== 4) return null;
   const correct = String(parsed.correct_answer || "").trim();
   if (!options.includes(correct)) return null;
+
+  // Check that all options are distinct
+  const uniqueOptions = new Set(options.map(o => o.trim().toLowerCase()));
+  if (uniqueOptions.size !== 4) return null;
+
+  // Check that question_text is not empty
+  if (parsed.question_text.trim().length < 5) return null;
+
   const explanation = String(parsed.explanation || "").trim() || "See class notes for a refresher.";
   return {
     question_text: parsed.question_text.trim(),
@@ -101,40 +109,89 @@ async function insertQuestionRow(pool, sub, ch, diff, item) {
   return normalizeRow(insert.rows[0], item.options);
 }
 
-async function generateOneQuestionFromGroq(client, sub, ch, diff) {
-  const userPrompt = `You write short multiple-choice questions for middle-school / early high-school students.
+const QUESTION_SYSTEM_PROMPT = `You are a quiz question writer for a school education platform. You create factually accurate multiple-choice questions.
+
+CRITICAL RULES FOR ACCURACY:
+1. Every correct_answer MUST be mathematically/factually verified. Double-check all calculations.
+2. For math questions: solve the problem step-by-step in your head BEFORE writing the answer. Verify the answer is correct.
+3. For science/history questions: only use well-established facts. Do not make up dates, formulas, or facts.
+4. The 3 wrong options (distractors) must be plausible but clearly WRONG. They should represent common mistakes students make.
+5. The correct_answer string must EXACTLY match one of the 4 options, character-for-character.
+6. Output ONLY valid JSON, no markdown fences, no extra text.
+
+EXAMPLES OF COMMON MISTAKES TO AVOID:
+- Math: 3(2x - 1) = 6x - 3, NOT 6x - 2 or 6x - 1. Always distribute correctly.
+- Math: When solving 2x + 5 = 11, x = 3, NOT x = 4.
+- Science: Water boils at 100°C at sea level, NOT 90°C.
+- Always verify arithmetic: multiplication, division, signs (+/-).`;
+
+async function generateOneQuestionFromGroq(client, sub, ch, diff, attempt = 0) {
+  const userPrompt = `Create ONE multiple-choice question for middle-school / early high-school students.
 
 Subject: ${sub}
 Topic / chapter focus: ${ch}
 Difficulty: ${diff}
 
-Return ONLY a JSON object (no markdown) with this exact shape:
+IMPORTANT: Before finalizing, mentally verify that your correct_answer is actually correct. If it's a math problem, solve it step-by-step and double check signs, arithmetic, and the final value.
+
+Return ONLY a JSON object with this exact shape:
 {
-  "question_text": "string, one clear question",
+  "question_text": "one clear question",
   "options": ["exactly four distinct answer strings"],
-  "correct_answer": "string that exactly matches one element of options",
-  "explanation": "one sentence why the correct answer is right"
+  "correct_answer": "must exactly match one option string",
+  "explanation": "brief explanation of WHY this answer is correct, showing the key step"
 }
 
 Rules:
+- Output ONLY the JSON object, nothing else.
 - options must be exactly 4 strings, plausible distractors, no "all of the above".
-- correct_answer must === one option string character-for-character.`;
+- correct_answer must === one option string character-for-character.
+- The correct_answer MUST be factually/mathematically correct. Verify before responding.`;
 
-  const completion = await client.chat.completions.create({
-    model: "llama-3.1-8b-instant",
-    messages: [
-      { role: "system", content: "You output only valid JSON for quiz questions. No prose outside JSON." },
-      { role: "user", content: userPrompt }
-    ],
-    temperature: 0.65,
-    max_tokens: 600
-  });
+  try {
+    const reqParams = {
+      model: "llama-3.1-8b-instant",
+      messages: [
+        { role: "system", content: QUESTION_SYSTEM_PROMPT },
+        { role: "user", content: userPrompt }
+      ],
+      temperature: 0.3,
+      max_tokens: 600
+    };
 
-  const raw = completion.choices[0]?.message?.content || "";
-  const parsed = extractJsonObject(raw);
-  const item = validateQuestionItem(parsed);
-  if (!item) throw new Error("Model did not return parseable question JSON");
-  return item;
+    // Try with response_format first, fall back without it
+    let completion;
+    try {
+      completion = await client.chat.completions.create({
+        ...reqParams,
+        response_format: { type: "json_object" }
+      });
+    } catch (fmtErr) {
+      // response_format might not be supported — retry without it
+      console.error("[QuestionGen] response_format failed, retrying without:", fmtErr.message);
+      completion = await client.chat.completions.create(reqParams);
+    }
+
+    const raw = completion.choices[0]?.message?.content || "";
+    const parsed = extractJsonObject(raw);
+    const item = validateQuestionItem(parsed);
+    if (!item) {
+      console.error(`[QuestionGen] Parse failed (attempt ${attempt + 1}/3). Raw:`, raw.substring(0, 500));
+      if (attempt < 2) {
+        return generateOneQuestionFromGroq(client, sub, ch, diff, attempt + 1);
+      }
+      throw new Error("Model did not return parseable question JSON after 3 attempts");
+    }
+    return item;
+  } catch (err) {
+    if (attempt < 2 && !err.message.includes("after 3 attempts")) {
+      console.error(`[QuestionGen] API error (attempt ${attempt + 1}/3):`, err.message);
+      // Wait a bit before retry (rate limiting)
+      await new Promise(r => setTimeout(r, 1000));
+      return generateOneQuestionFromGroq(client, sub, ch, diff, attempt + 1);
+    }
+    throw err;
+  }
 }
 
 /**
@@ -166,20 +223,22 @@ async function generateAndStoreQuestionsBatch(pool, { subject, chapter, difficul
 
   const tryBatch = async () => {
     const client = getGroqClient();
-    const userPrompt = `You write short multiple-choice questions for middle-school / early high-school students.
+    const userPrompt = `Create ${n} multiple-choice questions for middle-school / early high-school students.
 
 Subject: ${sub}
 Topic / chapter focus: ${ch}
 Difficulty: ${diff}
 
-Return ONLY valid JSON (no markdown) with this exact shape:
+IMPORTANT: For EVERY question, mentally verify your correct_answer is actually correct before including it. If it's math, solve step-by-step and check signs and arithmetic. If it's a fact, make sure it's accurate.
+
+Return ONLY valid JSON with this exact shape:
 {
   "questions": [
     {
       "question_text": "string",
       "options": ["four distinct answer strings"],
       "correct_answer": "must exactly match one string in options",
-      "explanation": "one short sentence"
+      "explanation": "brief explanation showing WHY this is the correct answer"
     }
   ]
 }
@@ -188,24 +247,34 @@ Rules:
 - The "questions" array MUST contain exactly ${n} items.
 - Each item: exactly 4 options, plausible distractors, no "all of the above".
 - Questions must be distinct from each other (different angles or sub-skills within the topic).
-- correct_answer must match one option character-for-character.`;
+- correct_answer must match one option character-for-character.
+- Every correct_answer MUST be factually/mathematically verified. Double-check all calculations and signs.`;
 
-    const completion = await client.chat.completions.create({
+    const reqParams = {
       model: "llama-3.1-8b-instant",
       messages: [
-        {
-          role: "system",
-          content: "You output only valid JSON. The questions array length must match the requested count exactly."
-        },
+        { role: "system", content: QUESTION_SYSTEM_PROMPT },
         { role: "user", content: userPrompt }
       ],
-      temperature: 0.7,
+      temperature: 0.3,
       max_tokens: Math.min(8000, 400 + n * 450)
-    });
+    };
+
+    let completion;
+    try {
+      completion = await client.chat.completions.create({
+        ...reqParams,
+        response_format: { type: "json_object" }
+      });
+    } catch (fmtErr) {
+      console.error("[QuestionGen Batch] response_format failed, retrying without:", fmtErr.message);
+      completion = await client.chat.completions.create(reqParams);
+    }
 
     const raw = completion.choices[0]?.message?.content || "";
     const arr = extractQuestionsArray(raw);
     if (!Array.isArray(arr) || arr.length < n) {
+      console.error("[QuestionGen Batch] Parse failed. Expected", n, "got", Array.isArray(arr) ? arr.length : 0, "Raw:", raw.substring(0, 500));
       throw new Error(`Batch parse: expected at least ${n} questions, got ${Array.isArray(arr) ? arr.length : 0}`);
     }
 

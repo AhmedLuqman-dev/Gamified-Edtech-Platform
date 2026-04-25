@@ -68,7 +68,7 @@ const QuestModal = ({
   const queueRef = useRef([]);
   queueRef.current = questionQueue;
 
-  const rounds = useGroqQuestions ? Math.max(1, Math.min(10, Number(questionsPerTopic) || QUEST_ROUNDS)) : 1;
+  const rounds = useGroqQuestions ? (questionQueue.length || Math.max(1, Math.min(10, Number(questionsPerTopic) || QUEST_ROUNDS))) : 1;
 
   useEffect(() => {
     if (!isOpen || !node) return;
@@ -102,8 +102,8 @@ const QuestModal = ({
             ...data,
             options: normalizeOptions(data.options)
           }));
-          if (normalized.length !== rounds) {
-            throw new Error(`Expected ${rounds} questions, got ${normalized.length}`);
+          if (normalized.length === 0) {
+            throw new Error("No questions available for this topic. Try again later.");
           }
           setQuestionQueue(normalized);
           setQuestion(normalized[0]);
@@ -215,7 +215,22 @@ const QuestModal = ({
         return;
       }
 
-      /* Groq multi-round: no /check-answer until all rounds correct */
+      /* Groq multi-round: ALWAYS call /check-answer to track activity/streak/attendance */
+      const isLastRound = queueIndex >= rounds - 1;
+      const isLastRoundCorrect = isLastRound && clientCorrect;
+
+      // Always call /check-answer — send XP only on final correct round
+      const result = await apiFetch("/check-answer", {
+        method: "POST",
+        body: JSON.stringify({
+          question_id: question.id,
+          selected_option: option,
+          user_id: selectedStudentId,
+          quest_xp: isLastRoundCorrect ? (node.xp || 0) : 0,
+          chapter: node.chapter
+        })
+      });
+
       if (!clientCorrect) {
         setBattleState({
           isCorrect: false,
@@ -225,10 +240,11 @@ const QuestModal = ({
         });
         setShowBattle(true);
         fetchExplanation(question, option);
+        if (result.newQuest && onRefresherQuest) {
+          onRefresherQuest(result.newQuest);
+        }
         return;
       }
-
-      const isLastRound = queueIndex >= rounds - 1;
 
       if (!isLastRound) {
         setBattleState({
@@ -242,17 +258,7 @@ const QuestModal = ({
         return;
       }
 
-      const result = await apiFetch("/check-answer", {
-        method: "POST",
-        body: JSON.stringify({
-          question_id: question.id,
-          selected_option: option,
-          user_id: selectedStudentId,
-          quest_xp: node.xp || 0,
-          chapter: node.chapter
-        })
-      });
-
+      // Final round correct
       setBattleState({
         isCorrect: result.correct,
         partialCorrect: false,
@@ -261,10 +267,6 @@ const QuestModal = ({
       });
       setShowBattle(true);
       fetchExplanation(question, option);
-
-      if (!result.correct && result.newQuest && onRefresherQuest) {
-        onRefresherQuest(result.newQuest);
-      }
     } catch (err) {
       setFeedback(err.message || "Connection lost");
     } finally {

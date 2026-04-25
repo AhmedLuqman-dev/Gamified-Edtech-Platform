@@ -57,7 +57,7 @@ const StudentDashboard = ({ user, onLogout }) => {
     load();
   }, [user.id]);
 
-  const stats = board?.stats || { xp: 0, level: 1, streak: 0 };
+  const stats = board?.stats || { xp: 0, level: 1, streak: 0, xp_in_current_level: 0, xp_for_next_level: 150, level_progress_percent: 0 };
   const subjectRows = board?.subject_progress || [];
   const leaderboard = board?.leaderboard || [];
 
@@ -85,11 +85,6 @@ const StudentDashboard = ({ user, onLogout }) => {
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-            <div className="rounded-xl border border-cyan-500/30 bg-cyan-950/50 px-3 py-1.5 text-sm font-bold text-cyan-200">Lv {stats.level}</div>
-            <div className="rounded-xl border border-amber-500/30 bg-amber-950/40 px-3 py-1.5 text-sm font-bold text-amber-200">{stats.xp} XP</div>
-            <div className="rounded-xl border border-fuchsia-500/30 bg-fuchsia-950/40 px-3 py-1.5 text-sm font-bold text-fuchsia-200">
-              Streak {stats.streak ?? 0}
-            </div>
             <button
               type="button"
               onClick={onLogout}
@@ -99,6 +94,62 @@ const StudentDashboard = ({ user, onLogout }) => {
             </button>
           </div>
         </header>
+
+        {/* ═══════ XP / Level / Streak Hero Bar ═══════ */}
+        <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {/* Level + XP Progress */}
+          <div className="relative overflow-hidden rounded-2xl border border-cyan-500/25 bg-gradient-to-br from-cyan-950/80 to-slate-900/90 p-5 shadow-[0_0_30px_rgba(6,182,212,0.1)] sm:col-span-2">
+            <div className="absolute -right-4 -top-4 h-24 w-24 rounded-full bg-cyan-500/5 blur-2xl" aria-hidden />
+            <div className="flex items-center gap-4">
+              {/* Level Badge */}
+              <div className="relative flex h-20 w-20 shrink-0 items-center justify-center">
+                <div className="absolute inset-0 rounded-2xl border-2 border-cyan-400/40 bg-gradient-to-br from-cyan-500/20 to-violet-600/20 shadow-[0_0_20px_rgba(6,182,212,0.2)]" />
+                <div className="relative text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-400/90">Level</p>
+                  <p className="font-['Nunito'] text-3xl font-black text-cyan-100 drop-shadow-[0_0_8px_rgba(6,182,212,0.5)]">{stats.level}</p>
+                </div>
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between">
+                  <p className="text-sm font-extrabold text-cyan-200">{stats.xp} XP total</p>
+                  <p className="text-xs text-slate-400">{stats.xp_in_current_level || 0} / {stats.xp_for_next_level || 150} to next level</p>
+                </div>
+                {/* XP Progress Bar */}
+                <div className="mt-2 h-3 overflow-hidden rounded-full bg-slate-800/80 border border-slate-700/50">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-violet-500 transition-all duration-1000 ease-out shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                    style={{ width: `${stats.level_progress_percent || 0}%` }}
+                  />
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-xs text-slate-500">Lv {stats.level}</span>
+                  <div className="flex-1" />
+                  <span className="text-xs text-slate-500">Lv {stats.level + 1}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Streak */}
+          <div className="relative overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-950/60 to-slate-900/90 p-5 shadow-[0_0_30px_rgba(251,191,36,0.08)]">
+            <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-amber-500/10 blur-2xl" aria-hidden />
+            <div className="relative flex flex-col items-center justify-center text-center h-full">
+              <span className="text-4xl mb-1" style={{ filter: stats.streak > 0 ? 'drop-shadow(0 0 8px rgba(251,191,36,0.6))' : 'none' }}>
+                {stats.streak > 0 ? '🔥' : '❄️'}
+              </span>
+              <p className="font-['Nunito'] text-3xl font-black text-amber-100">{stats.streak ?? 0}</p>
+              <p className="text-xs font-bold uppercase tracking-widest text-amber-400/80">
+                {stats.streak === 1 ? 'Day Streak' : 'Day Streak'}
+              </p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                {stats.streak > 0
+                  ? `Keep solving daily to maintain!`
+                  : `Solve a problem to start your streak!`}
+              </p>
+            </div>
+          </div>
+        </div>
 
         {error ? <p className="mb-4 rounded-xl border border-rose-500/40 bg-rose-950/50 p-3 text-rose-200">{error}</p> : null}
 

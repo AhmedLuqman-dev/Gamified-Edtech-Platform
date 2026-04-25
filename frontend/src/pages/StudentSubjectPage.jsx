@@ -174,7 +174,7 @@ const StudentSubjectPage = ({ user, onLogout }) => {
         defaultSubject={subjectLabel}
         useGroqQuestions
         battleVariant={slug === "science" ? "science" : "sword"}
-        questionsPerTopic={5}
+        questionsPerTopic={3}
       />
     </div>
   );

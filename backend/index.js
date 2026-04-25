@@ -23,6 +23,16 @@ const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || "admin")
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
 const isAdminUser = (user) => ADMIN_USERNAMES.includes(user?.username);
 
+/** Convert chapter IDs like "sci::cells" or "Refresher: sci::cells" to readable names */
+const formatChapterName = (chapter) => {
+  if (!chapter) return "Unknown";
+  let name = chapter.replace(/^Refresher:\s*/i, "");
+  // Remove subject prefix like "sci::", "hist::", "math::"
+  name = name.replace(/^[a-z]+::/i, "");
+  // Capitalize first letter
+  return name.charAt(0).toUpperCase() + name.slice(1);
+};
+
 const signAuthToken = (user) =>
   jwt.sign(
     {
@@ -597,19 +607,54 @@ app.post("/questions/generate-batch", authRequired(["student"]), async (req, res
   try {
     const { subject, chapter, difficulty, count } = req.body || {};
     if (!chapter) return res.status(400).json({ error: "chapter is required" });
-    const questions = await generateAndStoreQuestionsBatch(pool, {
-      subject: subject || "General",
-      chapter,
-      difficulty: difficulty || "medium",
-      count: count != null ? Number(count) : 5
+    const n = count != null ? Number(count) : 5;
+
+    // 1. Check DB first for existing questions (instant!)
+    const dbResult = await pool.query(
+      `SELECT id, subject, chapter, difficulty, question_text, options, correct_answer, explanation
+       FROM questions
+       WHERE chapter = $1
+       ORDER BY RANDOM()
+       LIMIT $2`,
+      [chapter, n]
+    );
+
+    let questions = dbResult.rows.map(row => {
+      let opts = row.options;
+      if (typeof opts === "string") {
+        try { opts = JSON.parse(opts); } catch { opts = []; }
+      }
+      return { ...row, options: opts, _source: "db_cached" };
     });
-    res.status(201).json({ questions });
-  } catch (err) {
-    const msg = err.message || "Batch generation failed";
-    if (String(msg).includes("GROQ_KEY")) {
-      return res.status(503).json({ error: msg });
+
+    // 2. If we have enough, serve immediately — no Groq call needed
+    if (questions.length >= n) {
+      return res.json({ questions: questions.slice(0, n) });
     }
-    res.status(500).json({ error: msg });
+
+    // 3. Not enough in DB — generate only the missing ones from Groq
+    const needed = n - questions.length;
+    try {
+      const generated = await generateAndStoreQuestionsBatch(pool, {
+        subject: subject || "General",
+        chapter,
+        difficulty: difficulty || "medium",
+        count: needed
+      });
+      questions = questions.concat(generated);
+    } catch (groqErr) {
+      console.error("[generate-batch] Groq generation failed:", groqErr.message);
+      // If we have at least 1 question from DB, serve what we have
+      if (questions.length > 0) {
+        return res.json({ questions });
+      }
+      const msg = groqErr.message || "Generation failed";
+      return res.status(String(msg).includes("GROQ_KEY") ? 503 : 500).json({ error: msg });
+    }
+
+    res.json({ questions });
+  } catch (err) {
+    res.status(500).json({ error: err.message || "Batch generation failed" });
   }
 });
 
@@ -662,8 +707,33 @@ app.get("/student/:id/home-board", authRequired(["student", "parent"]), async (r
 
     const subject_progress = getSubjectProgressSummary(progress.rows);
 
+    const rawStats = stats.rows[0] || { xp: 0, level: 1, streak: 0, last_active: null };
+    const xp = rawStats.xp || 0;
+    const computedLevel = Math.floor(xp / 150) + 1;
+    const xpInCurrentLevel = xp % 150;
+    const levelProgressPercent = Math.round((xpInCurrentLevel / 150) * 100);
+
+    // Check streak freshness: if last_active is not today or yesterday, streak should show as 0
+    let displayStreak = rawStats.streak || 0;
+    if (rawStats.last_active) {
+      const lastDate = new Date(rawStats.last_active);
+      lastDate.setHours(0, 0, 0, 0);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const diffDays = Math.round((today - lastDate) / (1000 * 60 * 60 * 24));
+      if (diffDays > 1) displayStreak = 0;
+    }
+
     res.json({
-      stats: stats.rows[0] || { xp: 0, level: 1, streak: 0, last_active: null },
+      stats: {
+        xp,
+        level: computedLevel,
+        streak: displayStreak,
+        last_active: rawStats.last_active,
+        xp_for_next_level: 150,
+        xp_in_current_level: xpInCurrentLevel,
+        level_progress_percent: levelProgressPercent
+      },
       subject_progress,
       leaderboard: leaders.rows
     });
@@ -707,24 +777,24 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
         [parentId]
         );
 
-        const studentId = link.rows[0].student_id;
         if (link.rows.length === 0) {
             return res.status(404).json({
                 error: "No student linked to this parent"
             });
         }
+        const studentId = link.rows[0].student_id;
         const student = await pool.query(
         `SELECT * FROM "user" WHERE id = $1`,
         [studentId]
         );
 
+        /* ---------- Average Grade ---------- */
         const grades = await pool.query(
         `SELECT * FROM assignment_submission WHERE user_id = $1`,
         [studentId]
         );
 
         let total = 0;
-
         grades.rows.forEach(g => {
         total += g.percentage;
         });
@@ -733,28 +803,61 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
         ? total / grades.rows.length
         : 0;
 
-        const attendance = await pool.query(
-        `SELECT * FROM attendance WHERE student_id = $1`,
-        [studentId]
-        );
-
-        let present = 0;
-
-        attendance.rows.forEach(a => {
-        if (a.status === "PRESENT" || a.status === "LATE") {
-            present++;
+        /* ---------- Attendance from daily_activity ---------- */
+        let attendance_percent = 0;
+        let total_active_days = 0;
+        let total_days_since_start = 1;
+        try {
+            const activityResult = await pool.query(
+              `SELECT COUNT(*) AS active_days,
+                      MIN(activity_date) AS first_date,
+                      MAX(activity_date) AS last_date
+               FROM daily_activity WHERE user_id = $1`,
+              [studentId]
+            );
+            const row = activityResult.rows[0];
+            total_active_days = parseInt(row.active_days) || 0;
+            if (row.first_date) {
+              const firstDate = new Date(row.first_date);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              firstDate.setHours(0, 0, 0, 0);
+              total_days_since_start = Math.max(1, Math.round((today - firstDate) / (1000 * 60 * 60 * 24)) + 1);
+              attendance_percent = Math.round((total_active_days / total_days_since_start) * 100);
+            }
+        } catch (attErr) {
+            console.error("Attendance query failed:", attErr.message);
         }
-        });
 
-        const attendance_percent = attendance.rows.length ? (present / attendance.rows.length) * 100: 0;
-
+        /* ---------- Weak/Strong Topics (attempt-based) ---------- */
         let weak_topics = [];
         let strong_topics = [];
+        try {
+            const chapterProgress = await pool.query(
+              `SELECT chapter, status, attempt_count FROM student_chapter_progress WHERE user_id = $1`,
+              [studentId]
+            );
 
-        grades.rows.forEach(g => {
-            if (g.percentage <= 50) weak_topics.push(g.assignment_id);
-            if (g.percentage >= 80) strong_topics.push(g.assignment_id);
-        });
+            chapterProgress.rows.forEach(cp => {
+                const attempts = cp.attempt_count || 1;
+                const isCompleted = (cp.status || "").toLowerCase() === "completed" || (cp.status || "").toLowerCase() === "complete";
+                const topicName = formatChapterName(cp.chapter);
+
+                if (attempts > 1) {
+                    // Multiple attempts = weak topic
+                    weak_topics.push({ topic: topicName, attempts, completed: isCompleted });
+                } else if (isCompleted) {
+                    // Completed on first attempt = strong topic
+                    strong_topics.push({ topic: topicName, attempts });
+                }
+            });
+        } catch (_) {
+            // Fallback to grade-based if student_chapter_progress doesn't have attempt_count
+            grades.rows.forEach(g => {
+                if (g.percentage <= 50) weak_topics.push({ topic: g.assignment_id, attempts: null });
+                if (g.percentage >= 80) strong_topics.push({ topic: g.assignment_id, attempts: null });
+            });
+        }
 
         // Compute student_profile (struggling / average / advanced)
         let student_profile = "average";
@@ -764,11 +867,68 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
             student_profile = "struggling";
         }
 
+        /* ---------- XP, Level, Streak ---------- */
+        let studentStats = { xp: 0, level: 1, streak: 0 };
+        try {
+          const statsResult = await pool.query(
+            `SELECT xp, level, streak, last_active FROM student_stats WHERE user_id = $1 LIMIT 1`,
+            [studentId]
+          );
+          if (statsResult.rows.length) {
+            const s = statsResult.rows[0];
+            const xp = s.xp || 0;
+            studentStats.xp = xp;
+            studentStats.level = Math.floor(xp / 150) + 1;
+
+            // Check streak freshness
+            let displayStreak = s.streak || 0;
+            if (s.last_active) {
+              const lastDate = new Date(s.last_active);
+              lastDate.setHours(0, 0, 0, 0);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const diffDays = Math.round((today - lastDate) / (1000 * 60 * 60 * 24));
+              if (diffDays > 1) displayStreak = 0;
+            }
+            studentStats.streak = displayStreak;
+          }
+        } catch (_) {}
+
+        /* ---------- Trend & Risk (handle no-data gracefully) ---------- */
+        const hasGradeData = grades.rows.length > 0;
+        const hasActivityData = total_active_days > 0;
+
+        // Use XP-based progress when no assignment_submission data
+        let effectiveGrade = average_grade;
+        if (!hasGradeData && studentStats.xp > 0) {
+          // Student has been active (has XP) but no formal grades yet
+          // Estimate based on chapter completion ratio
+          const completedTopics = strong_topics.length;
+          const totalAttempted = weak_topics.length + strong_topics.length;
+          effectiveGrade = totalAttempted > 0 ? (completedTopics / totalAttempted) * 100 : 60;
+        }
+
+        let effectiveAttendance = attendance_percent;
+        if (!hasActivityData && studentStats.streak > 0) {
+          // Student has a streak but daily_activity is empty (legacy data)
+          effectiveAttendance = 50; // Give benefit of doubt
+        }
+
         let trend = "stable";
-        if (average_grade > 70) trend = "improving";
-        else if (average_grade < 50) trend = "declining";
+        if (!hasGradeData && !hasActivityData) {
+          trend = studentStats.xp > 0 ? "stable" : "no data";
+        } else if (effectiveGrade > 70) {
+          trend = "improving";
+        } else if (effectiveGrade < 50) {
+          trend = "declining";
+        }
     
         function calculateRisk(grade, attendance) {
+            // If no real data, don't flag as critical
+            if (!hasGradeData && !hasActivityData) {
+              return studentStats.xp > 0 ? "SAFE" : "NO DATA";
+            }
+
             let score = 0;
 
             if (grade < 40) score += 50;
@@ -784,17 +944,20 @@ app.get("/parent/:id/dashboard", authRequired(["parent"]), async (req, res) => {
             return "SAFE";
         }
 
-        const risk_level = calculateRisk(average_grade, attendance_percent);
+        const risk_level = calculateRisk(effectiveGrade, effectiveAttendance);
 
         res.json({
             child: student.rows[0].username,
             average_grade,
             attendance: attendance_percent,
+            total_active_days,
+            total_days_since_start,
             weak_topics,
             strong_topics,
             trend,
             risk_level,
-            student_profile
+            student_profile,
+            student_stats: studentStats
         });
 
     } catch (err) {
@@ -819,28 +982,75 @@ app.get("/parent/:id/history", authRequired(["parent"]), async (req, res) => {
 
     const studentId = link.rows[0].student_id;
 
-    const [attendanceHistory, gradeHistory] = await Promise.all([
-      pool.query(
-        `SELECT cs.date, cs.topic, a.status
-         FROM attendance a
-         JOIN class_session cs ON cs.id = a.session_id
-         WHERE a.student_id = $1
-         ORDER BY cs.date ASC`,
+    // Get daily activity history (actual problem-solving days)
+    let activityHistory = [];
+    try {
+      const actResult = await pool.query(
+        `SELECT activity_date, 'PRESENT' AS status
+         FROM daily_activity
+         WHERE user_id = $1
+         ORDER BY activity_date ASC`,
         [studentId]
-      ),
-      pool.query(
+      );
+      activityHistory = actResult.rows.map(r => ({
+        date: r.activity_date,
+        status: r.status,
+        topic: 'Problem solving'
+      }));
+    } catch (e) {
+      console.error("Activity history query failed:", e.message);
+    }
+
+    // Fallback: also try legacy attendance table
+    if (activityHistory.length === 0) {
+      try {
+        const legacyResult = await pool.query(
+          `SELECT cs.date, cs.topic, a.status
+           FROM attendance a
+           JOIN class_session cs ON cs.id = a.session_id
+           WHERE a.student_id = $1
+           ORDER BY cs.date ASC`,
+          [studentId]
+        );
+        activityHistory = legacyResult.rows;
+      } catch (_) {}
+    }
+
+    // Get grade history
+    let gradeHistory = [];
+    try {
+      const gradeResult = await pool.query(
         `SELECT s.id, s.percentage, a.title
          FROM assignment_submission s
          JOIN assignment a ON a.id = s.assignment_id
          WHERE s.user_id = $1
          ORDER BY s.id ASC`,
         [studentId]
-      )
-    ]);
+      );
+      gradeHistory = gradeResult.rows;
+    } catch (_) {}
+
+    // Get chapter progress as grade-like data (fallback when no assignment_submissions)
+    if (gradeHistory.length === 0) {
+      try {
+        const progressResult = await pool.query(
+          `SELECT chapter, status, mastery_level, attempt_count
+           FROM student_chapter_progress
+           WHERE user_id = $1
+           ORDER BY id ASC`,
+          [studentId]
+        );
+        gradeHistory = progressResult.rows.map((r, i) => ({
+          id: i + 1,
+          title: formatChapterName(r.chapter),
+          percentage: r.mastery_level || 0
+        }));
+      } catch (_) {}
+    }
 
     res.json({
-      attendance_history: attendanceHistory.rows,
-      grade_history: gradeHistory.rows
+      attendance_history: activityHistory,
+      grade_history: gradeHistory
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -866,11 +1076,72 @@ app.post("/check-answer", authRequired(["student", "parent", "admin"]), async (r
     }
 
     const correct = question.rows[0].correct_answer;
-
     let isCorrect = selected_option === correct;
 
-    if (!isCorrect) {
+    /* ---------- Track attempt_count per chapter (for weak/strong topics) ---------- */
+    // Only mark chapter as 'completed' on the FINAL correct answer (quest_xp > 0).
+    // Intermediate Groq rounds send quest_xp=0, so they only bump attempt_count.
+    const isFinalCorrect = isCorrect && quest_xp > 0;
 
+    if (chapter) {
+      const existingProgress = await pool.query(
+        `SELECT id, mastery_level, attempt_count, status FROM student_chapter_progress WHERE user_id = $1 AND chapter = $2 LIMIT 1`,
+        [user_id, chapter]
+      );
+
+      if (existingProgress.rows.length) {
+        const row = existingProgress.rows[0];
+        const newAttempts = (row.attempt_count || 0) + 1;
+        if (isFinalCorrect) {
+          await pool.query(
+            `UPDATE student_chapter_progress
+             SET status = 'completed', mastery_level = GREATEST(COALESCE(mastery_level, 0), 80), attempt_count = $3
+             WHERE user_id = $1 AND chapter = $2`,
+            [user_id, chapter, newAttempts]
+          );
+        } else {
+          await pool.query(
+            `UPDATE student_chapter_progress
+             SET attempt_count = $3
+             WHERE user_id = $1 AND chapter = $2`,
+            [user_id, chapter, newAttempts]
+          );
+        }
+      } else {
+        if (isFinalCorrect) {
+          await pool.query(
+            `INSERT INTO student_chapter_progress (user_id, chapter, status, mastery_level, attempt_count)
+             VALUES ($1, $2, 'completed', 80, 1)`,
+            [user_id, chapter]
+          );
+        } else {
+          await pool.query(
+            `INSERT INTO student_chapter_progress (user_id, chapter, status, mastery_level, attempt_count)
+             VALUES ($1, $2, 'unlocked', 0, 1)`,
+            [user_id, chapter]
+          );
+        }
+      }
+    }
+
+    /* ---------- Log daily attendance for ANY attempt (for parent dashboard) ---------- */
+    try {
+      // Check if record already exists for today
+      const existingActivity = await pool.query(
+        `SELECT id FROM daily_activity WHERE user_id = $1 AND activity_date = CURRENT_DATE LIMIT 1`,
+        [user_id]
+      );
+      if (!existingActivity.rows.length) {
+        await pool.query(
+          `INSERT INTO daily_activity (user_id, activity_date) VALUES ($1, CURRENT_DATE)`,
+          [user_id]
+        );
+      }
+    } catch (dailyErr) {
+      console.error("daily_activity insert failed:", dailyErr.message);
+    }
+
+    if (!isCorrect) {
       const refresher = await pool.query(
         `INSERT INTO curriculum 
         (chapter, prerequisite, xp, difficulty, type, unlock_message, is_optional, order_index)
@@ -896,52 +1167,67 @@ app.post("/check-answer", authRequired(["student", "parent", "admin"]), async (r
       });
     }
 
+    /* ---------- XP, Level, and Streak calculation ---------- */
     const existingStats = await pool.query(
-      `SELECT id, xp FROM student_stats WHERE user_id = $1 LIMIT 1`,
+      `SELECT id, xp, streak, last_active FROM student_stats WHERE user_id = $1 LIMIT 1`,
       [user_id]
     );
 
+    let newXp = quest_xp;
+    let newStreak = 1;
+    let newLevel = 1;
+
     if (existingStats.rows.length) {
+      const row = existingStats.rows[0];
+      newXp = (row.xp || 0) + quest_xp;
+      newLevel = Math.floor(newXp / 150) + 1;
+
+      // Streak logic: if last_active is today, keep streak; if yesterday, +1; else reset to 1
+      const lastActive = row.last_active ? new Date(row.last_active) : null;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      if (lastActive) {
+        const lastDate = new Date(lastActive);
+        lastDate.setHours(0, 0, 0, 0);
+        const diffDays = Math.round((today - lastDate) / (1000 * 60 * 60 * 24));
+
+        if (diffDays === 0) {
+          // Same day — streak stays
+          newStreak = row.streak || 1;
+        } else if (diffDays === 1) {
+          // Yesterday — increment streak
+          newStreak = (row.streak || 0) + 1;
+        } else {
+          // Missed day(s) — reset streak
+          newStreak = 1;
+        }
+      }
+
       await pool.query(
         `UPDATE student_stats
-         SET xp = COALESCE(xp, 0) + $1, last_active = CURRENT_DATE
-         WHERE user_id = $2`,
-        [quest_xp, user_id]
+         SET xp = $1, level = $2, streak = $3, last_active = CURRENT_DATE
+         WHERE user_id = $4`,
+        [newXp, newLevel, newStreak, user_id]
       );
     } else {
+      newXp = quest_xp;
+      newLevel = Math.floor(newXp / 150) + 1;
+      newStreak = 1;
       await pool.query(
         `INSERT INTO student_stats (user_id, xp, level, streak, last_active)
-         VALUES ($1, $2, 1, 0, CURRENT_DATE)`,
-        [user_id, quest_xp]
+         VALUES ($1, $2, $3, $4, CURRENT_DATE)`,
+        [user_id, newXp, newLevel, newStreak]
       );
-    }
-
-    if (chapter) {
-      const existingProgress = await pool.query(
-        `SELECT id, mastery_level FROM student_chapter_progress WHERE user_id = $1 AND chapter = $2 LIMIT 1`,
-        [user_id, chapter]
-      );
-
-      if (existingProgress.rows.length) {
-        await pool.query(
-          `UPDATE student_chapter_progress
-           SET status = 'completed', mastery_level = GREATEST(COALESCE(mastery_level, 0), 80)
-           WHERE user_id = $1 AND chapter = $2`,
-          [user_id, chapter]
-        );
-      } else {
-        await pool.query(
-          `INSERT INTO student_chapter_progress (user_id, chapter, status, mastery_level)
-           VALUES ($1, $2, 'completed', 80)`,
-          [user_id, chapter]
-        );
-      }
     }
 
     res.json({
       correct: true,
       message: "Good job! Quest cleared",
-      xp_awarded: quest_xp
+      xp_awarded: quest_xp,
+      new_xp: newXp,
+      new_level: newLevel,
+      new_streak: newStreak
     });
 
   } catch (err) {
@@ -979,6 +1265,52 @@ app.post("/ai/explain", async (req, res) => {
   }
 });
 
-app.listen(process.env.PORT, () => {
-//   console.log("Server running on port " + process.env.PORT);
+/* ---------- Auto-migrations ---------- */
+const runMigrations = async () => {
+  try {
+    // Ensure daily_activity table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS daily_activity (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        activity_date DATE NOT NULL DEFAULT CURRENT_DATE,
+        UNIQUE(user_id, activity_date)
+      )
+    `);
+
+    // Add UNIQUE constraint if missing (table may exist from previous setup without it)
+    const uniqueCheck = await pool.query(`
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'daily_activity'::regclass
+        AND contype = 'u'
+      LIMIT 1
+    `);
+    if (!uniqueCheck.rows.length) {
+      console.log("Adding missing UNIQUE constraint to daily_activity...");
+      await pool.query(`
+        ALTER TABLE daily_activity
+        ADD CONSTRAINT daily_activity_user_date_unique UNIQUE (user_id, activity_date)
+      `);
+    }
+
+    // Add attempt_count column to student_chapter_progress if missing
+    const colCheck = await pool.query(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'student_chapter_progress' AND column_name = 'attempt_count'
+      LIMIT 1
+    `);
+    if (!colCheck.rows.length) {
+      await pool.query(`ALTER TABLE student_chapter_progress ADD COLUMN attempt_count INTEGER DEFAULT 0`);
+    }
+
+    console.log("Migrations completed successfully");
+  } catch (err) {
+    console.error("Migration warning:", err.message);
+  }
+};
+
+runMigrations().then(() => {
+  app.listen(process.env.PORT, () => {
+    console.log("Server running on port " + process.env.PORT);
+  });
 });
