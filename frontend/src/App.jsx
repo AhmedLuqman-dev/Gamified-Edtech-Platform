@@ -5,8 +5,8 @@ import ParentAuthPage from "./pages/ParentAuthPage";
 import StudentDashboard from "./pages/StudentDashboard";
 import StudentSubjectPage from "./pages/StudentSubjectPage";
 import ParentDashboard from "./pages/ParentDashboard";
-import AdminQuestMapPage from "./pages/AdminQuestMapPage";
-import AdminLoginPage from "./pages/AdminLoginPage";
+import TeacherDashboard from "./pages/TeacherDashboard";
+import TeacherAuthPage from "./pages/TeacherAuthPage";
 import { clearSession, getUser } from "./lib/auth";
 
 const Guard = ({ user, role, children }) => {
@@ -15,9 +15,9 @@ const Guard = ({ user, role, children }) => {
   return children;
 };
 
-const AdminGuard = ({ user, children }) => {
+const TeacherGuard = ({ user, children }) => {
   if (!user) return <Navigate to="/" replace />;
-  if (user.role !== "admin") return <Navigate to="/" replace />;
+  if (user.role !== "teacher") return <Navigate to="/" replace />;
   return children;
 };
 
@@ -34,7 +34,7 @@ const App = () => {
       <Route path="/" element={<LandingPage />} />
       <Route path="/auth/student" element={<StudentAuthPage />} />
       <Route path="/auth/parent" element={<ParentAuthPage />} />
-      <Route path="/admin" element={<AdminLoginPage />} />
+      <Route path="/teacher" element={<TeacherAuthPage />} />
       <Route
         path="/student"
         element={
@@ -60,11 +60,11 @@ const App = () => {
         }
       />
       <Route
-        path="/admin/quest-map"
+        path="/teacher/dashboard"
         element={
-          <AdminGuard user={user}>
-            <AdminQuestMapPage onLogout={onLogout} />
-          </AdminGuard>
+          <TeacherGuard user={user}>
+            <TeacherDashboard onLogout={onLogout} />
+          </TeacherGuard>
         }
       />
       <Route path="*" element={<Navigate to="/" replace />} />

@@ -16,12 +16,6 @@ app.use(express.json());
 app.use(cors());
 
 const JWT_SECRET = process.env.JWT_SECRET || "dev-secret-change-me";
-const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || "admin")
-  .split(",")
-  .map((x) => x.trim())
-  .filter(Boolean);
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
-const isAdminUser = (user) => ADMIN_USERNAMES.includes(user?.username);
 
 /** Convert chapter IDs like "sci::cells" or "Refresher: sci::cells" to readable names */
 const formatChapterName = (chapter) => {
@@ -215,17 +209,119 @@ app.post("/auth/parent/login", async (req, res) => {
   }
 });
 
-app.post("/auth/admin/login", async (req, res) => {
+app.post("/auth/teacher/signup", async (req, res) => {
+  try {
+    const { username, password, school_id } = req.body;
+    if (!username || !password || !school_id) return res.status(400).json({ error: "username, password, school_id are required" });
+
+    await ensurePasswordColumn();
+
+    const check = await pool.query(`SELECT 1 FROM "user" WHERE username = $1 LIMIT 1`, [username]);
+    if (check.rows.length) return res.status(400).json({ error: "Username taken" });
+
+    const hashed = await bcrypt.hash(password, 10);
+    const insert = await pool.query(
+      `INSERT INTO "user" (username, role, school_id, password)
+       VALUES ($1, 'teacher', $2, $3)
+       RETURNING id, username, role, school_id`,
+      [username, school_id, hashed]
+    );
+
+    const user = insert.rows[0];
+    const token = signAuthToken(user);
+    res.status(201).json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/auth/teacher/login", async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: "username and password are required" });
-    if (!ADMIN_USERNAMES.includes(username) || password !== ADMIN_PASSWORD) {
-      return res.status(401).json({ error: "Invalid admin credentials" });
+
+    await ensurePasswordColumn();
+
+    const userResult = await pool.query(
+      `SELECT id, username, role, school_id, password FROM "user" WHERE username = $1 AND role = 'teacher' LIMIT 1`,
+      [username]
+    );
+    if (!userResult.rows.length) return res.status(401).json({ error: "Invalid credentials" });
+
+    const user = userResult.rows[0];
+    const ok = await verifyStoredPassword(password, user.password);
+    if (!ok) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = signAuthToken(user);
+    res.json({ token, user: { id: user.id, username: user.username, role: user.role, school_id: user.school_id } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/teacher/students", authRequired(["teacher"]), async (req, res) => {
+  try {
+    const schoolId = req.user.school_id;
+    const studentsResult = await pool.query(
+      `SELECT id, username FROM "user" WHERE role = 'student' AND school_id = $1`,
+      [schoolId]
+    );
+
+    const students = studentsResult.rows;
+
+    const studentIds = students.map(s => s.id);
+    let statsResult = { rows: [] };
+    let progressResult = { rows: [] };
+    
+    if (studentIds.length > 0) {
+      statsResult = await pool.query(
+        `SELECT user_id, xp FROM student_stats WHERE user_id = ANY($1::int[])`,
+        [studentIds]
+      );
+      progressResult = await pool.query(
+        `SELECT user_id, mastery_level, status FROM student_chapter_progress WHERE user_id = ANY($1::int[])`,
+        [studentIds]
+      );
     }
 
-    const adminUser = { id: 0, username, role: "admin", school_id: null };
-    const token = signAuthToken(adminUser);
-    res.json({ token, user: adminUser });
+    const xpByUser = {};
+    statsResult.rows.forEach(r => xpByUser[r.user_id] = r.xp);
+    
+    const progressByUser = {};
+    progressResult.rows.forEach(r => {
+      if (!progressByUser[r.user_id]) progressByUser[r.user_id] = [];
+      progressByUser[r.user_id].push(r);
+    });
+
+    const detailedStudents = students.map(s => {
+      const xp = xpByUser[s.id] || 0;
+      const progressRows = progressByUser[s.id] || [];
+      
+      let strengths = 0;
+      let weaknesses = 0;
+      
+      if (xp >= 200) strengths += 1;
+      if (xp >= 500) strengths += 1;
+      if (xp > 0 && xp < 50) weaknesses += 1;
+
+      progressRows.forEach(row => {
+          if (row.mastery_level >= 80) strengths++;
+          if (row.mastery_level <= 50 && row.status !== 'locked') weaknesses++;
+      });
+
+      let profile = "average";
+      if (strengths > weaknesses + 1) profile = "advanced";
+      else if (weaknesses > strengths || (xp === 0 && progressRows.length === 0)) profile = "struggling";
+      
+      return {
+        id: s.id,
+        label: s.username,
+        username: s.username,
+        profile: profile
+      };
+    });
+
+    res.json({ students: detailedStudents });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -245,121 +341,8 @@ app.get("/", (req, res) => {
   res.send("Backend is running ");
 });
 
-app.get("/student/:id/recommendation", authRequired(["student", "parent"]), async (req, res) => {
-  try {
-    const userId = req.params.id;
-    if (req.user.role === "student" && Number(req.user.id) !== Number(userId)) {
-      return res.status(403).json({ error: "Students can only access their own data" });
-    }
 
-
-    const submissions = await pool.query(`
-        SELECT s.*, a.title
-        FROM assignment_submission s
-        JOIN assignment a ON s.assignment_id = a.id
-        WHERE s.user_id = $1
-        `, [userId]);
-
-    let strengths = [];
-    let weaknesses = [];
-
-    submissions.rows.forEach((row) => {
-    const chapter = row.title;
-
-    if (row.percentage >= 80) {
-        strengths.push(chapter);
-    } else if (row.percentage <= 50) {
-        weaknesses.push(chapter);
-    }
-    });
-
-    const curriculum = await pool.query(
-      `SELECT * FROM curriculum ORDER BY order_index`
-    );
-
-    let bestNode = null;
-    let bestScore = -1;
-
-    const curriculumRows = curriculum.rows;
-
-    function isUnlocked(node) {
-    if (!node.prerequisite) return true;
-    return strengths.includes(node.prerequisite);
-    }
-
-    let profile = "average";
-
-    if (strengths.length > weaknesses.length + 2) {
-        profile = "advanced";
-    } else if (weaknesses.length > strengths.length) {
-        profile = "struggling";
-    }
-
-    for (let node of curriculumRows) {
-
-    if (!isUnlocked(node)) continue;
-
-    let score = 0;
-
-    const isWeak = weaknesses.some(w => w.includes(node.chapter));
-    const isStrong = strengths.some(s => s.includes(node.chapter));
-
-    if (isWeak) score += 50;
-    if (isStrong) score -= 30;
-
-    score += node.xp || 0;
-
-    if (node.difficulty === "easy") score += 10;
-    if (node.difficulty === "hard") score += 30;
-
-    if (profile === "struggling" && node.difficulty === "easy") {
-        score += 20;
-    }
-
-    if (profile === "advanced" && node.difficulty === "hard") {
-        score += 40;
-    }
-
-    if (score > bestScore) {
-        bestScore = score;
-        bestNode = node;
-    }
-    }
-
-    let recommendation = bestNode ? bestNode.chapter : curriculumRows[0].chapter;
-
-    // res.json({
-    //     strengths,
-    //     weaknesses,
-    //     recommendation,
-    //     xp_reward: bestNode?.xp,
-    //     difficulty: bestNode?.difficulty,
-    //     story: bestNode?.unlock_message,
-    //     type: bestNode?.type,
-    //     student_profile: profile
-    // });
-    res.json({
-        strengths,
-        weaknesses,
-        recommendation,
-        xp_reward: bestNode?.xp,
-        difficulty: bestNode?.difficulty,
-        story: bestNode?.unlock_message,
-        type: bestNode?.type,
-        student_profile: profile,
-        debug: {
-            bestScore,
-            selectedNode: bestNode?.chapter
-        }
-});
-    
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/student/:id/quest-map", authRequired(["student", "parent", "admin"]), async (req, res) => {
+app.get("/student/:id/quest-map", authRequired(["student", "parent", "teacher"]), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (req.user.role === "student" && Number(req.user.id) !== userId) {
@@ -375,30 +358,30 @@ app.get("/student/:id/quest-map", authRequired(["student", "parent", "admin"]), 
       }
     }
 
-    const [recommendationResult, curriculumResult, statsResult, progressResult] = await Promise.all([
-      pool.query(`
-        SELECT s.percentage, a.title
-        FROM assignment_submission s
-        JOIN assignment a ON s.assignment_id = a.id
-        WHERE s.user_id = $1
-      `, [userId]),
+    const [curriculumResult, statsResult, progressResult] = await Promise.all([
       pool.query(`SELECT * FROM curriculum ORDER BY order_index ASC`),
       pool.query(`SELECT * FROM student_stats WHERE user_id = $1 LIMIT 1`, [userId]),
       pool.query(`SELECT * FROM student_chapter_progress WHERE user_id = $1`, [userId])
     ]);
 
-    const strengths = [];
-    const weaknesses = [];
+    const xp = statsResult.rows[0]?.xp || 0;
+    const progressRows = progressResult.rows;
 
-    recommendationResult.rows.forEach((row) => {
-      const chapter = row.title;
-      if (row.percentage >= 80) strengths.push(chapter);
-      if (row.percentage <= 50) weaknesses.push(chapter);
+    let strengths = 0;
+    let weaknesses = 0;
+
+    if (xp >= 200) strengths += 1;
+    if (xp >= 500) strengths += 1;
+    if (xp > 0 && xp < 50) weaknesses += 1;
+
+    progressRows.forEach(row => {
+      if (row.mastery_level >= 80) strengths++;
+      if (row.mastery_level <= 50 && row.status !== 'locked') weaknesses++;
     });
 
     let profile = "average";
-    if (strengths.length > weaknesses.length + 2) profile = "advanced";
-    else if (weaknesses.length > strengths.length) profile = "struggling";
+    if (strengths > weaknesses + 1) profile = "advanced";
+    else if (weaknesses > strengths || (xp === 0 && progressRows.length === 0)) profile = "struggling";
 
     const normCh = (s) => String(s ?? "").trim();
     const normStatus = (s) => String(s ?? "").trim().toLowerCase();
@@ -464,35 +447,8 @@ app.get("/student/:id/quest-map", authRequired(["student", "parent", "admin"]), 
   }
 });
 
-app.get("/student/:id/overview", authRequired(["student", "parent"]), async (req, res) => {
-  try {
-    const userId = Number(req.params.id);
-    if (req.user.role === "student" && Number(req.user.id) !== userId) {
-      return res.status(403).json({ error: "Students can only access their own data" });
-    }
 
-    const [stats, submissions] = await Promise.all([
-      pool.query(`SELECT * FROM student_stats WHERE user_id = $1 LIMIT 1`, [userId]),
-      pool.query(
-        `SELECT s.id, s.score, s.total, s.percentage, a.title
-         FROM assignment_submission s
-         JOIN assignment a ON a.id = s.assignment_id
-         WHERE s.user_id = $1
-         ORDER BY s.id DESC`,
-        [userId]
-      )
-    ]);
-
-    res.json({
-      stats: stats.rows[0] || { xp: 0, level: 1, streak: 0 },
-      submissions: submissions.rows
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get("/questions/random", authRequired(["student", "parent", "admin"]), async (req, res) => {
+app.get("/questions/random", authRequired(["student", "parent", "teacher"]), async (req, res) => {
   try {
     const chapter = req.query.chapter != null ? String(req.query.chapter).trim() : "";
     const difficulty = req.query.difficulty != null ? String(req.query.difficulty).trim() : "";
@@ -584,24 +540,7 @@ app.get("/questions/random", authRequired(["student", "parent", "admin"]), async
   }
 });
 
-app.post("/questions/generate", authRequired(["student"]), async (req, res) => {
-  try {
-    const { subject, chapter, difficulty } = req.body || {};
-    if (!chapter) return res.status(400).json({ error: "chapter is required" });
-    const row = await generateAndStoreQuestion(pool, {
-      subject: subject || "General",
-      chapter,
-      difficulty: difficulty || "medium"
-    });
-    res.status(201).json(row);
-  } catch (err) {
-    const msg = err.message || "Generation failed";
-    if (msg.includes("GROQ_KEY")) {
-      return res.status(503).json({ error: msg });
-    }
-    res.status(500).json({ error: msg });
-  }
-});
+
 
 app.post("/questions/generate-batch", authRequired(["student"]), async (req, res) => {
   try {
@@ -658,15 +597,9 @@ app.post("/questions/generate-batch", authRequired(["student"]), async (req, res
   }
 });
 
-app.get("/meta/subjects", authRequired(["student", "parent", "admin"]), (_req, res) => {
-  const list = listSubjectKeys().map((slug) => {
-    const s = SUBJECT_PATHS[slug];
-    return { slug: s.slug, label: s.label, accent: s.accent, chapter_count: s.chapters.length };
-  });
-  res.json({ subjects: list });
-});
 
-app.get("/meta/subjects/:slug/topics", authRequired(["student", "parent", "admin"]), (req, res) => {
+
+app.get("/meta/subjects/:slug/topics", authRequired(["student", "parent", "teacher"]), (req, res) => {
   const def = getSubjectPath(req.params.slug);
   if (!def) return res.status(404).json({ error: "Unknown subject" });
   res.json({
@@ -742,7 +675,7 @@ app.get("/student/:id/home-board", authRequired(["student", "parent"]), async (r
   }
 });
 
-app.get("/student/:id/subject/:slug/quest-map", authRequired(["student", "parent", "admin"]), async (req, res) => {
+app.get("/student/:id/subject/:slug/quest-map", authRequired(["student", "parent", "teacher"]), async (req, res) => {
   try {
     const userId = Number(req.params.id);
     if (req.user.role === "student" && Number(req.user.id) !== userId) {
@@ -1057,13 +990,11 @@ app.get("/parent/:id/history", authRequired(["parent"]), async (req, res) => {
   }
 });
 
-app.post("/check-answer", authRequired(["student", "parent", "admin"]), async (req, res) => {
+app.post("/check-answer", authRequired(["student", "parent", "teacher"]), async (req, res) => {
   try {
     const { question_id, selected_option, user_id, quest_xp = 0, chapter } = req.body;
-    if (!isAdminUser(req.user)) {
-      if (req.user.role !== "student" || Number(req.user.id) !== Number(user_id)) {
-        return res.status(403).json({ error: "Only the owning student can submit answers" });
-      }
+    if (req.user.role !== "student" || Number(req.user.id) !== Number(user_id)) {
+      return res.status(403).json({ error: "Only the owning student can submit answers" });
     }
 
     const question = await pool.query(

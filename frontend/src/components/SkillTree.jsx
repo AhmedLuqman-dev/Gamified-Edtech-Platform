@@ -30,7 +30,7 @@ const ParticleField = () => {
   );
 };
 
-const SkillTree = ({ curriculum, onNodeClick, activeQuestChapter }) => {
+const SkillTree = ({ curriculum, onNodeClick, activeQuestChapter, isReadOnly }) => {
   const sortedNodes = [...curriculum].sort((a, b) => a.order_index - b.order_index);
 
   return (
@@ -86,6 +86,7 @@ const SkillTree = ({ curriculum, onNodeClick, activeQuestChapter }) => {
                   status={status}
                   isActive={Boolean(activeQuestChapter && activeQuestChapter === node.chapter)}
                   onClick={onNodeClick}
+                  isReadOnly={isReadOnly}
                 />
               </div>
             </div>

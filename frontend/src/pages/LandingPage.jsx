@@ -5,7 +5,15 @@ const cardClass =
 
 const LandingPage = () => {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-5xl items-center px-4 py-10 sm:px-6">
+    <div className="relative mx-auto flex min-h-screen w-full max-w-5xl items-center px-4 py-10 sm:px-6">
+      <Link 
+        to="/teacher" 
+        className="absolute right-4 top-4 sm:right-6 sm:top-6 flex items-center justify-center rounded-2xl border border-white/60 bg-white/85 px-5 py-2 shadow-soft backdrop-blur transition hover:-translate-y-1 hover:bg-white"
+        title="Teacher Portal"
+      >
+        <span className="text-xs font-bold uppercase tracking-widest text-slate-600">Teacher</span>
+      </Link>
+
       <div className="w-full space-y-6">
         <header
           className="eduquest-hero-card rounded-3xl border border-white/70 bg-white/80 px-6 py-10 shadow-soft backdrop-blur sm:px-10 sm:py-12"
