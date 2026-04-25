@@ -25,6 +25,199 @@ body {
   min-height: 100vh;
 }
 
+/* Landing — EduRPG hero */
+.edurpg-hero-card {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  animation: edurpgCardGlow 5s ease-in-out infinite;
+}
+
+.edurpg-hero-card::before {
+  content: "";
+  position: absolute;
+  inset: -40%;
+  background: conic-gradient(
+    from 180deg at 50% 50%,
+    rgba(47, 124, 246, 0.12),
+    rgba(47, 191, 143, 0.1),
+    rgba(255, 112, 67, 0.12),
+    rgba(47, 124, 246, 0.12)
+  );
+  animation: edurpgAuraSpin 14s linear infinite;
+  z-index: 0;
+}
+
+.edurpg-hero-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    transparent 40%,
+    rgba(255, 255, 255, 0.45) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: edurpgShineSweep 6s ease-in-out infinite;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.edurpg-hero-inner {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-height: clamp(10rem, 28vh, 14rem);
+  align-items: center;
+  justify-content: center;
+}
+
+.edurpg-title {
+  margin: 0;
+  font-family: "Nunito", sans-serif;
+  font-size: clamp(3rem, 12vw, 5.5rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  background: linear-gradient(
+    92deg,
+    #2f7cf6 0%,
+    #2fbf8f 28%,
+    #ff7043 55%,
+    #a78bfa 78%,
+    #2f7cf6 100%
+  );
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: edurpgTextShimmer 5s linear infinite, edurpgTitleFloat 3.2s ease-in-out infinite;
+  filter: drop-shadow(0 6px 20px rgba(47, 124, 246, 0.35)) drop-shadow(0 2px 0 rgba(20, 25, 34, 0.08));
+}
+
+.edurpg-sparkles {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.edurpg-spark {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: radial-gradient(circle, #fff 0%, rgba(47, 124, 246, 0.4) 55%, transparent 70%);
+  box-shadow: 0 0 10px rgba(47, 191, 143, 0.8);
+  animation: edurpgTwinkle 2.4s ease-in-out infinite;
+}
+
+.edurpg-spark:nth-child(1) {
+  top: 18%;
+  left: 12%;
+  animation-delay: 0s;
+}
+.edurpg-spark:nth-child(2) {
+  top: 22%;
+  right: 14%;
+  animation-delay: 0.4s;
+}
+.edurpg-spark:nth-child(3) {
+  bottom: 20%;
+  left: 18%;
+  animation-delay: 0.8s;
+}
+.edurpg-spark:nth-child(4) {
+  bottom: 24%;
+  right: 11%;
+  animation-delay: 1.1s;
+}
+.edurpg-spark:nth-child(5) {
+  top: 48%;
+  left: 6%;
+  animation-delay: 0.2s;
+  transform: scale(0.85);
+}
+.edurpg-spark:nth-child(6) {
+  top: 52%;
+  right: 7%;
+  animation-delay: 1.5s;
+  transform: scale(0.75);
+}
+
+@keyframes edurpgCardGlow {
+  0%,
+  100% {
+    box-shadow:
+      0 10px 30px rgba(20, 25, 34, 0.08),
+      0 0 0 1px rgba(255, 255, 255, 0.5);
+  }
+  50% {
+    box-shadow:
+      0 14px 36px rgba(47, 124, 246, 0.18),
+      0 0 48px rgba(47, 191, 143, 0.12),
+      0 0 0 1px rgba(255, 255, 255, 0.65);
+  }
+}
+
+@keyframes edurpgAuraSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes edurpgShineSweep {
+  0%,
+  100% {
+    background-position: 100% 0;
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.35;
+  }
+  50% {
+    background-position: -100% 0;
+    opacity: 0.45;
+  }
+  85% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes edurpgTextShimmer {
+  0% {
+    background-position: 0% center;
+  }
+  100% {
+    background-position: 200% center;
+  }
+}
+
+@keyframes edurpgTitleFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-8px) scale(1.02);
+  }
+}
+
+@keyframes edurpgTwinkle {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 /* Student "game" shell — only wraps student dashboard */
 .student-arena {
   background:
@@ -137,6 +330,206 @@ body {
   right: 0;
   height: 4px;
   background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.5), transparent);
+}
+
+/* Science lab — bacteria duel */
+.battle-science-arena {
+  position: relative;
+  width: 100%;
+  height: 280px;
+  background: linear-gradient(180deg, #042f2e 0%, #0f172a 45%, #134e4a 100%);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.battle-science-ground {
+  border-top-color: rgba(45, 212, 191, 0.35);
+}
+
+.battle-science-ground::before {
+  background: linear-gradient(90deg, transparent, rgba(52, 211, 153, 0.45), transparent);
+}
+
+.battle-science-scientist {
+  position: absolute;
+  left: 6%;
+  bottom: 48px;
+  width: 72px;
+  height: 96px;
+  z-index: 12;
+  transition: transform 0.35s ease, filter 0.35s ease;
+}
+
+.battle-science-scientist-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.35));
+}
+
+.battle-science-scientist--treat {
+  animation: scienceAimPulse 0.5s ease-in-out 2;
+}
+
+.battle-science-scientist--hurt {
+  animation: scienceScientistHurt 0.7s ease-out forwards;
+}
+
+@keyframes scienceAimPulse {
+  0%,
+  100% {
+    transform: translateX(0) scale(1);
+  }
+  50% {
+    transform: translateX(4px) scale(1.04);
+  }
+}
+
+@keyframes scienceScientistHurt {
+  0% {
+    transform: translateX(0);
+    filter: drop-shadow(0 0 10px rgba(34, 211, 238, 0.35));
+  }
+  40% {
+    transform: translateX(-12px) rotate(-4deg);
+    filter: drop-shadow(0 0 14px rgba(248, 113, 113, 0.9)) hue-rotate(-12deg);
+  }
+  100% {
+    transform: translateX(0);
+    filter: drop-shadow(0 0 8px rgba(248, 113, 113, 0.45));
+  }
+}
+
+.battle-science-beam-wrap {
+  position: absolute;
+  left: 18%;
+  top: 38%;
+  width: 70%;
+  height: 80px;
+  z-index: 8;
+  pointer-events: none;
+  animation: scienceBeamSweep 0.55s ease-out forwards;
+  opacity: 0;
+}
+
+.battle-science-beam-svg {
+  width: 100%;
+  height: 100%;
+}
+
+@keyframes scienceBeamSweep {
+  0% {
+    opacity: 0;
+    transform: translateX(-20%) scaleX(0.3);
+  }
+  40% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.95;
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+.battle-science-bug {
+  position: absolute;
+  right: 6%;
+  bottom: 52px;
+  width: 96px;
+  height: 96px;
+  z-index: 10;
+  transition: transform 0.4s ease, opacity 0.5s ease;
+}
+
+.battle-science-bug-svg {
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 12px rgba(74, 222, 128, 0.45));
+}
+
+.battle-science-bug--attack {
+  animation: scienceBugLunge 0.75s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes scienceBugLunge {
+  0% {
+    transform: translateX(0) scale(1);
+  }
+  55% {
+    transform: translateX(calc(-1 * min(52vw, 220px))) scale(1.18) rotate(-6deg);
+  }
+  100% {
+    transform: translateX(calc(-1 * min(42vw, 180px))) scale(1.08) rotate(0deg);
+  }
+}
+
+.battle-science-bug--dead {
+  animation: scienceBugLyse 1s ease-in forwards;
+}
+
+@keyframes scienceBugLyse {
+  0% {
+    transform: scale(1) rotate(0deg);
+    opacity: 1;
+    filter: drop-shadow(0 0 12px rgba(74, 222, 128, 0.45));
+  }
+  45% {
+    transform: scale(1.12) rotate(8deg);
+    filter: drop-shadow(0 0 24px rgba(34, 197, 94, 0.8));
+  }
+  100% {
+    transform: scale(0) rotate(200deg);
+    opacity: 0;
+    filter: blur(4px);
+  }
+}
+
+.battle-science-pop {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(190, 242, 100, 0.65), transparent 68%);
+  animation: sciencePop 0.6s ease-out forwards;
+  pointer-events: none;
+}
+
+@keyframes sciencePop {
+  0% {
+    opacity: 1;
+    transform: scale(0.4);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+
+.battle-science-infect-flash {
+  position: absolute;
+  inset: -30%;
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.45), transparent 65%);
+  border-radius: 50%;
+  animation: scienceInfectPulse 0.55s ease-out 2;
+  pointer-events: none;
+}
+
+@keyframes scienceInfectPulse {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.battle-science-result {
+  font-size: clamp(0.75rem, 2.8vw, 1.35rem);
+  white-space: normal;
+  text-align: center;
+  max-width: 92%;
+  line-height: 1.2;
 }
 
 /* Hero */

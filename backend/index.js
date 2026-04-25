@@ -8,6 +8,9 @@ require("dotenv").config();
 
 const pool = require("./db");
 const generateExplanation = require("./ai/explanationEngine");
+const { generateAndStoreQuestion, generateAndStoreQuestionsBatch } = require("./ai/questionGenerator");
+const { buildSubjectQuestMap, getSubjectProgressSummary } = require("./subjectQuestMap");
+const { SUBJECT_PATHS, listSubjectKeys, getSubjectPath } = require("./data/subjectPaths");
 
 app.use(express.json());
 app.use(cors());
@@ -566,6 +569,128 @@ app.get("/questions/random", authRequired(["student", "parent", "admin"]), async
     }
 
     res.json({ ...row, _match: used });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/questions/generate", authRequired(["student"]), async (req, res) => {
+  try {
+    const { subject, chapter, difficulty } = req.body || {};
+    if (!chapter) return res.status(400).json({ error: "chapter is required" });
+    const row = await generateAndStoreQuestion(pool, {
+      subject: subject || "General",
+      chapter,
+      difficulty: difficulty || "medium"
+    });
+    res.status(201).json(row);
+  } catch (err) {
+    const msg = err.message || "Generation failed";
+    if (msg.includes("GROQ_KEY")) {
+      return res.status(503).json({ error: msg });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.post("/questions/generate-batch", authRequired(["student"]), async (req, res) => {
+  try {
+    const { subject, chapter, difficulty, count } = req.body || {};
+    if (!chapter) return res.status(400).json({ error: "chapter is required" });
+    const questions = await generateAndStoreQuestionsBatch(pool, {
+      subject: subject || "General",
+      chapter,
+      difficulty: difficulty || "medium",
+      count: count != null ? Number(count) : 5
+    });
+    res.status(201).json({ questions });
+  } catch (err) {
+    const msg = err.message || "Batch generation failed";
+    if (String(msg).includes("GROQ_KEY")) {
+      return res.status(503).json({ error: msg });
+    }
+    res.status(500).json({ error: msg });
+  }
+});
+
+app.get("/meta/subjects", authRequired(["student", "parent", "admin"]), (_req, res) => {
+  const list = listSubjectKeys().map((slug) => {
+    const s = SUBJECT_PATHS[slug];
+    return { slug: s.slug, label: s.label, accent: s.accent, chapter_count: s.chapters.length };
+  });
+  res.json({ subjects: list });
+});
+
+app.get("/meta/subjects/:slug/topics", authRequired(["student", "parent", "admin"]), (req, res) => {
+  const def = getSubjectPath(req.params.slug);
+  if (!def) return res.status(404).json({ error: "Unknown subject" });
+  res.json({
+    slug: def.slug,
+    label: def.label,
+    accent: def.accent,
+    topicGraph: def.topicGraph,
+    chapters: def.chapters.map((c) => ({
+      chapter: c.chapter,
+      label: c.unlock_message,
+      order_index: c.order_index,
+      difficulty: c.difficulty
+    }))
+  });
+});
+
+app.get("/student/:id/home-board", authRequired(["student", "parent"]), async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (req.user.role === "student" && Number(req.user.id) !== userId) {
+      return res.status(403).json({ error: "Students can only access their own data" });
+    }
+
+    const schoolId = req.user.school_id;
+    const [stats, progress, leaders] = await Promise.all([
+      pool.query(`SELECT xp, level, streak, last_active FROM student_stats WHERE user_id = $1 LIMIT 1`, [userId]),
+      pool.query(`SELECT id, chapter, status, mastery_level FROM student_chapter_progress WHERE user_id = $1`, [userId]),
+      pool.query(
+        `SELECT u.id, u.username, COALESCE(s.xp, 0) AS xp, COALESCE(s.level, 1) AS level
+         FROM "user" u
+         LEFT JOIN student_stats s ON s.user_id = u.id
+         WHERE u.role = 'student' AND u.school_id = $1
+         ORDER BY COALESCE(s.xp, 0) DESC, u.username ASC
+         LIMIT 12`,
+        [schoolId]
+      )
+    ]);
+
+    const subject_progress = getSubjectProgressSummary(progress.rows);
+
+    res.json({
+      stats: stats.rows[0] || { xp: 0, level: 1, streak: 0, last_active: null },
+      subject_progress,
+      leaderboard: leaders.rows
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/student/:id/subject/:slug/quest-map", authRequired(["student", "parent", "admin"]), async (req, res) => {
+  try {
+    const userId = Number(req.params.id);
+    if (req.user.role === "student" && Number(req.user.id) !== userId) {
+      return res.status(403).json({ error: "Students can only access their own data" });
+    }
+    if (req.user.role === "parent") {
+      const linkCheck = await pool.query(
+        `SELECT 1 FROM parent_student_link WHERE parent_id = $1 AND student_id = $2 LIMIT 1`,
+        [req.user.id, userId]
+      );
+      if (!linkCheck.rows.length) {
+        return res.status(403).json({ error: "Parent is not linked to this student" });
+      }
+    }
+
+    const map = await buildSubjectQuestMap(pool, userId, req.params.slug);
+    if (!map) return res.status(404).json({ error: "Unknown subject" });
+    res.json(map);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

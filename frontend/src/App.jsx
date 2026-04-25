@@ -3,6 +3,7 @@ import LandingPage from "./pages/LandingPage";
 import StudentAuthPage from "./pages/StudentAuthPage";
 import ParentAuthPage from "./pages/ParentAuthPage";
 import StudentDashboard from "./pages/StudentDashboard";
+import StudentSubjectPage from "./pages/StudentSubjectPage";
 import ParentDashboard from "./pages/ParentDashboard";
 import AdminQuestMapPage from "./pages/AdminQuestMapPage";
 import AdminLoginPage from "./pages/AdminLoginPage";
@@ -39,6 +40,14 @@ const App = () => {
         element={
           <Guard user={user} role="student">
             <StudentDashboard user={user} onLogout={onLogout} />
+          </Guard>
+        }
+      />
+      <Route
+        path="/student/subject/:slug"
+        element={
+          <Guard user={user} role="student">
+            <StudentSubjectPage user={user} onLogout={onLogout} />
           </Guard>
         }
       />
